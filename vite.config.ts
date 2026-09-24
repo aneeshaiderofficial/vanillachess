@@ -3,19 +3,15 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import tsConfigPaths from "vite-tsconfig-paths";
+import { nitro } from "nitro/vite";
 
 export default defineConfig({
-  server: {
-    port: 8080,
-    host: true,
-  },
+  server: { port: 8080 },
   plugins: [
     tsConfigPaths(),
     tailwindcss(),
-    tanstackStart({
-      // SSR entry lives in src/server.ts (error-page wrapper around the Start handler).
-      server: { entry: "server" },
-    }),
+    tanstackStart({ server: { entry: "server" } }),
+    nitro(),
     viteReact(),
   ],
 });
