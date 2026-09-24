@@ -115,6 +115,12 @@
     .winner-side.black-player { color: var(--black-piece, #111); text-shadow: var(--black-shadow, 1px 2px 2px #0008); }
     #checkmate-dialog button, #promotion-dialog button { padding: 9px 18px; border: 0; border-radius: 8px; background: var(--accent); color: #102010; font-weight: 800; cursor: pointer; }
     #promotion-dialog { width: min(360px, calc(100% - 28px)); padding: 22px; border: 0; border-radius: 16px; background: var(--panel); color: var(--text); box-shadow: 0 22px 70px #000b; text-align: center; }
+    #clock { display:flex; justify-content:center; gap:12px; margin:4px 0; font: 700 16px ui-monospace, monospace; }
+    #clock[hidden] { display:none; }
+    #clock span { padding:4px 12px; border-radius:6px; border:1px solid #fff3; opacity:.6; }
+    #clock span.running { opacity:1; border-color: var(--accent); }
+    #clock span.low { color:#ff8a7a; }
+    body.online-play .local-only { display:none !important; }
     #promotion-dialog::backdrop { background: #0009; backdrop-filter: blur(3px); }
     #promotion-dialog h2 { margin: 0 0 14px; font-size: 20px; }
     #promotion-choices { display: flex; justify-content: center; gap: 8px; }
@@ -169,6 +175,7 @@
     <div><p class="brand-kicker">ANEES HAIDER PRESENTS</p><h1>Vanilla Chess</h1><p class="brand-subtitle">A timeless game. A sharper mind.</p></div>
   </header>
   <div id="status" aria-live="polite">White to move</div>
+  <div id="clock" hidden aria-live="off"><span id="clock-w"></span><span id="clock-b"></span></div>
   <div id="last-move" aria-live="polite">No moves yet</div>
   <div id="board" role="grid" aria-label="Chess board"></div>
   <div id="controls">
@@ -180,6 +187,16 @@
     </select>
     <button id="tip-button" type="button">Get a tip</button>
     <button id="pause-button" type="button" hidden aria-pressed="false">⏸ Pause</button>
+    <button id="resign-button" type="button" class="local-only">Resign</button>
+    <button id="draw-offer-button" type="button" class="local-only">Offer draw</button>
+    <button id="draw-claim-button" type="button" class="local-only" hidden>Claim draw</button>
+    <label for="clock-select" class="local-only">Clock:</label>
+    <select id="clock-select" class="local-only" aria-label="Time control">
+      <option value="0">No clock</option>
+      <option value="180">3 min</option>
+      <option value="300">5 min</option>
+      <option value="600">10 min</option>
+    </select>
     <button id="settings-button" type="button" aria-expanded="false" aria-controls="settings">⚙ Settings</button>
   </div>
   <section id="settings" hidden aria-label="Game settings">
@@ -240,6 +257,7 @@
       constructor() { this.reset(); }
 
       reset() {
+        this.result = null;
         this.board = [
           ['bR','bN','bB','bQ','bK','bB','bN','bR'],
           ['bP','bP','bP','bP','bP','bP','bP','bP'],
@@ -293,6 +311,26 @@
       recordPosition() {
         const key = this.positionKey();
         this.positionCounts.set(key, (this.positionCounts.get(key) || 0) + 1);
+      }
+
+      checkerCount(color) {
+        let king = null;
+        for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) if (this.board[r][c] === color + 'K') king = { r, c };
+        if (!king) return 0;
+        let count = 0;
+        for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+          const piece = this.board[r][c];
+          if (piece && piece[0] !== color && this.getPseudoMoves(r, c, true).some(m => m.r === king.r && m.c === king.c)) count++;
+        }
+        return count;
+      }
+
+      // True when `color` has too little material to ever deliver checkmate
+      // (lone king, or king + one minor piece). Used for flag-fall draws.
+      cannotMate(color) {
+        const own = [];
+        for (const row of this.board) for (const piece of row) if (piece && piece[0] === color && piece[1] !== 'K') own.push(piece[1]);
+        return own.length === 0 || (own.length === 1 && ['B', 'N'].includes(own[0]));
       }
 
       isInsufficientMaterial() {
@@ -803,7 +841,17 @@
         return { from: { ...choice.from }, to: { ...choice.to } };
       }
 
+      // Draws a player may claim (FIDE 9.2 / 9.3). They are not automatic.
+      claimableDraw() {
+        if (this.gameOver || this.result) return null;
+        if (!this.getAllLegalMoves(this.turn).length) return null;
+        if (this.halfmoveClock >= 100) return 'Draw claimed by the 50-move rule';
+        if ((this.positionCounts.get(this.positionKey()) || 0) >= 3) return 'Draw claimed by threefold repetition';
+        return null;
+      }
+
       getStatus() {
+        if (this.result) return this.result;
         if (this.statusCache) return this.statusCache;
         const checked = this.isInCheck(this.turn);
         // Use this one authoritative legal-move list. A position is checkmate
@@ -813,21 +861,25 @@
           this.statusCache = checked
             ? `${this.turn === 'w' ? 'Black' : 'White'} wins by checkmate`
             : 'Draw by stalemate';
-        } else if (this.halfmoveClock >= 100) {
-          this.statusCache = 'Draw by the 50-move rule';
-        } else if ((this.positionCounts.get(this.positionKey()) || 0) >= 3) {
-          // Threefold repetition applies only when the current position itself
-          // has occurred three times, not when any historical position has.
-          this.statusCache = 'Draw by threefold repetition';
+        } else if (this.halfmoveClock >= 150) {
+          // 75-move rule: automatic draw (checkmate on the last move wins, handled above).
+          this.statusCache = 'Draw by the 75-move rule';
+        } else if ((this.positionCounts.get(this.positionKey()) || 0) >= 5) {
+          // Fivefold repetition: automatic draw.
+          this.statusCache = 'Draw by fivefold repetition';
         } else if (this.isInsufficientMaterial()) {
           this.statusCache = 'Draw by insufficient material';
         } else {
-          this.statusCache = `${this.turn === 'w' ? 'White' : 'Black'} to move${checked ? ' — Check!' : ''}`;
+          const claim = this.halfmoveClock >= 100 ? ' (50-move draw can be claimed)'
+            : (this.positionCounts.get(this.positionKey()) || 0) >= 3 ? ' (threefold draw can be claimed)' : '';
+          const double = checked && this.checkerCount(this.turn) > 1 ? ' — Double check!' : checked ? ' — Check!' : '';
+          this.statusCache = `${this.turn === 'w' ? 'White' : 'Black'} to move${double}${claim}`;
         }
         return this.statusCache;
       }
     }
 
+    var controlsReady = false;
     const engine = new ChessEngine();
 
     // Independent regression checks for checkmate and stalemate. These run at
@@ -1020,6 +1072,8 @@
     let pendingPromotion = null;
     let computerTimer = null;
     let isPaused = false;
+    const online = { active: false, color: null };
+    let applyingRemote = false;
     let lessonMoveCount = 0;
     let lessonQuestionPending = false;
 
@@ -1131,6 +1185,7 @@
       }
       boardEl.replaceChildren(fragment);
       statusEl.textContent = displayStatus(engine.getStatus());
+      if (controlsReady) updateGameControls();
       lastMoveEl.textContent = lastMove ? `${squareName(lastMove.from.r, lastMove.from.c)} → ${squareName(lastMove.to.r, lastMove.to.c)}` : 'No moves yet';
       updateMoveTip(false);
     }
@@ -1153,6 +1208,12 @@
       const captured = Boolean(engine.board[to.r][to.c]) || Boolean(to.enPassant);
       const moved = engine.movePiece(from.r, from.c, to.r, to.c, { ...to, promotion });
       if (!moved) return;
+      if (online.active && !applyingRemote) {
+        postToParent({
+          type: 'vc:move',
+          move: { from: { r: from.r, c: from.c }, to: { r: to.r, c: to.c }, promotion: promotion || null }
+        });
+      }
       lastMove = { from, to };
       selectedSquare = null;
       validMoves = [];
@@ -1191,6 +1252,7 @@
         engine.gameOver = true;
         clearTimeout(computerTimer);
         showCheckmateCelebration(status);
+        if (controlsReady) updateGameControls();
       } else if (status.startsWith('Draw')) {
         engine.gameOver = true;
         clearTimeout(computerTimer);
@@ -1201,6 +1263,7 @@
     function handleSquare(r, c) {
       if (isPaused || engine.gameOver || document.body.classList.contains('computer-thinking')) return;
       if (modeEl.value === 'computer' && engine.turn === 'b') return;
+      if (online.active && engine.turn !== online.color) return;
       const move = validMoves.find(item => item.r === r && item.c === c);
       if (selectedSquare && move) { finishMove(selectedSquare, move); return; }
       if (engine.board[r][c]?.[0] === engine.turn) {
@@ -1267,6 +1330,7 @@
 
     function resetGame() {
       clearTimeout(computerTimer);
+      if (controlsReady) resetClock();
       pendingPromotion = null;
       if (promotionDialog.open) promotionDialog.close();
       isPaused = false;
@@ -1336,10 +1400,129 @@
     boardThemeEl.addEventListener('change', event => applyBoardTheme(event.target.value));
     playerThemeEl.addEventListener('change', event => applyPlayerTheme(event.target.value));
     modeEl.addEventListener('change', () => {
+      online.active = false;
+      online.color = null;
       resetGame();
       updatePauseControl();
+      postToParent({ type: 'vc:mode', mode: modeEl.value });
     });
     document.getElementById('new-game').addEventListener('click', resetGame);
+
+    /* ---------- Resignation, draws and chess clock ---------- */
+    const resignButton = document.getElementById('resign-button');
+    const drawOfferButton = document.getElementById('draw-offer-button');
+    const drawClaimButton = document.getElementById('draw-claim-button');
+    const clockSelect = document.getElementById('clock-select');
+    const clockEl = document.getElementById('clock');
+    const clockW = document.getElementById('clock-w');
+    const clockB = document.getElementById('clock-b');
+    const clock = { w: 0, b: 0, last: 0 };
+    let clockTimer = null;
+    const colorName = color => color === 'w' ? 'White' : 'Black';
+
+    function endGame(result) {
+      if (engine.gameOver) return;
+      engine.result = result;
+      engine.gameOver = true;
+      engine.statusCache = null;
+      clearTimeout(computerTimer);
+      selectedSquare = null;
+      validMoves = [];
+      document.body.classList.remove('computer-thinking');
+      boardEl.classList.remove('computer-thinking');
+      renderBoard();
+    }
+
+    function humanColor() {
+      if (modeEl.value === 'human') return engine.turn;
+      if (modeEl.value === 'computer') return 'w';
+      return null;
+    }
+
+    function updateGameControls() {
+      const over = engine.gameOver;
+      const human = humanColor();
+      resignButton.disabled = over || !human;
+      drawOfferButton.disabled = over || !human;
+      drawClaimButton.hidden = !engine.claimableDraw() || !human || (modeEl.value === 'computer' && engine.turn !== 'w');
+      renderClock();
+    }
+
+    resignButton.addEventListener('click', () => {
+      const color = humanColor();
+      if (!color || engine.gameOver) return;
+      if (!confirm(`${displayStatus(colorName(color))}: resign this game?`)) return;
+      endGame(`${colorName(color === 'w' ? 'b' : 'w')} wins — ${colorName(color)} resigned`);
+    });
+
+    drawOfferButton.addEventListener('click', () => {
+      const color = humanColor();
+      if (!color || engine.gameOver) return;
+      if (modeEl.value === 'computer') {
+        // The computer accepts only when its position is not clearly better.
+        const score = engine.evaluate ? engine.evaluate('b') : 0;
+        if (score <= 150) endGame('Draw by agreement');
+        else { tipEl.textContent = 'The computer declined your draw offer.'; tipEl.hidden = false; }
+        return;
+      }
+      const other = color === 'w' ? 'b' : 'w';
+      if (confirm(`${displayStatus(colorName(color))} offers a draw. ${displayStatus(colorName(other))}, do you accept?`)) endGame('Draw by agreement');
+    });
+
+    drawClaimButton.addEventListener('click', () => {
+      const claim = engine.claimableDraw();
+      if (claim) endGame(claim);
+    });
+
+    function formatTime(sec) {
+      sec = Math.max(0, Math.ceil(sec));
+      return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+    }
+
+    function renderClock() {
+      const enabled = Number(clockSelect.value) > 0 && !online.active;
+      clockEl.hidden = !enabled;
+      if (!enabled) return;
+      clockW.textContent = `${displayStatus('White')} ${formatTime(clock.w)}`;
+      clockB.textContent = `${displayStatus('Black')} ${formatTime(clock.b)}`;
+      const running = !engine.gameOver && !isPaused;
+      clockW.classList.toggle('running', running && engine.turn === 'w');
+      clockB.classList.toggle('running', running && engine.turn === 'b');
+      clockW.classList.toggle('low', clock.w < 20);
+      clockB.classList.toggle('low', clock.b < 20);
+    }
+
+    function resetClock() {
+      clearInterval(clockTimer);
+      clockTimer = null;
+      const seconds = Number(clockSelect?.value || 0);
+      clock.w = clock.b = seconds;
+      clock.last = performance.now();
+      if (seconds > 0) clockTimer = setInterval(tickClock, 200);
+    }
+
+    function tickClock() {
+      const now = performance.now();
+      const elapsed = (now - clock.last) / 1000;
+      clock.last = now;
+      if (engine.gameOver || isPaused || online.active) { renderClock(); return; }
+      const side = engine.turn;
+      clock[side] -= elapsed;
+      if (clock[side] <= 0) {
+        clock[side] = 0;
+        const other = side === 'w' ? 'b' : 'w';
+        // Flag fall loses, unless the opponent could never checkmate.
+        endGame(engine.cannotMate(other)
+          ? `Draw — ${colorName(side)} ran out of time, but ${colorName(other)} cannot checkmate`
+          : `${colorName(other)} wins on time`);
+      }
+      renderClock();
+    }
+
+    clockSelect.addEventListener('change', resetGame);
+    controlsReady = true;
+    resetClock();
+    updateGameControls();
 
     tipButton.disabled = !tipsEnabledEl.checked;
     updatePauseControl();
@@ -1347,6 +1530,53 @@
     applyPlayerTheme(playerThemeEl.value);
     renderBoard();
     finishIfGameOver();
+
+    /* ---------- Online play bridge (talks to the app shell) ---------- */
+    function postToParent(message) {
+      if (window.parent && window.parent !== window) window.parent.postMessage(message, '*');
+    }
+
+    function applyRemoteMove(payload) {
+      if (!payload || !payload.from || !payload.to) return;
+      const from = { r: Number(payload.from.r), c: Number(payload.from.c) };
+      const target = { r: Number(payload.to.r), c: Number(payload.to.c) };
+      const legal = engine.getMoves(from.r, from.c).find(item => item.r === target.r && item.c === target.c);
+      if (!legal) return;
+      applyingRemote = true;
+      pendingPromotion = null;
+      if (promotionDialog.open) promotionDialog.close();
+      selectedSquare = null;
+      validMoves = [];
+      try {
+        finishMove(from, legal, payload.promotion || (engine.board[from.r][from.c]?.[1] === 'P' && (legal.r === 0 || legal.r === 7) ? 'Q' : null));
+      } finally {
+        applyingRemote = false;
+      }
+    }
+
+    window.addEventListener('message', event => {
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
+      if (data.type === 'vc:online-start') {
+        online.active = true;
+        online.color = data.color === 'b' ? 'b' : 'w';
+        document.body.classList.add('online-play');
+        modeEl.value = 'human';
+        isPaused = false;
+        resetGame();
+        updatePauseControl();
+      } else if (data.type === 'vc:online-end') {
+        online.active = false;
+        online.color = null;
+        document.body.classList.remove('online-play');
+      } else if (data.type === 'vc:remote-move') {
+        applyRemoteMove(data.move);
+      } else if (data.type === 'vc:reset') {
+        resetGame();
+      }
+    });
+
+    postToParent({ type: 'vc:ready', mode: modeEl.value });
   </script>
 </body>
 </html>

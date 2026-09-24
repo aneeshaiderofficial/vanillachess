@@ -1,52 +1,25 @@
 # Vanilla Chess
 
-**ANEES HAIDER PRESENTS — Vanilla Chess**
-
-A polished, fully playable chess game: two players, player vs. computer, and
-computer vs. computer, with legal-move highlighting, castling, en passant,
-promotion, check/checkmate and draw detection, move sounds, and optional tips.
+**Anees Haider presents — Vanilla Chess.** A timeless game. A sharper mind.
 
 ## Features
-
-- Three modes: two-player, player vs. computer, computer vs. computer
-- Legal move highlighting and last-move tracking
-- Full rules: castling, en passant, promotion, check, checkmate, stalemate and draws
-- Optional move tips and a "best move" hint
-- Pause, new game, and appearance settings
-- Dark tournament theme, responsive on phones and desktops
-
-## Tech stack
-
-- TanStack Start (React 19) with Vite
-- TypeScript
-- Tailwind CSS
+- Full chess rules: legal-move validation, check, double check, checkmate, stalemate, castling, en passant, promotion (Q/R/B/N)
+- Draws: agreement, threefold (claim) and fivefold (automatic) repetition, 50-move (claim) and 75-move (automatic) rules, insufficient material
+- Resignation and optional chess clock (3 / 5 / 10 min) with flag-fall rules
+- Two players, play vs computer, computer vs computer lessons, move tips
+- Guest sign-in, online matchmaking with real players and live in-game chat
 
 ## Getting started
+```bash
+bun install
+cp .env.example .env   # fill in your Supabase project values
+bun run dev
+```
+Apply the SQL files in `supabase/migrations` to your Supabase project.
 
-Requires Node.js 20+ (or Bun).
-
-```sh
-npm install
-npm run dev
+## Build
+```bash
+bun run build
 ```
 
-The app runs at http://localhost:8080.
-
-## Scripts
-
-- `npm run dev` — start the dev server
-- `npm run build` — production build
-- `npm run preview` — preview the production build
-- `npm run lint` — lint the codebase
-
-## Project layout
-
-```
-public/vanilla-chess.html   the complete chess game (engine, board, UI)
-src/routes/                 app routes and page metadata
-src/styles.css              design tokens and global styles
-```
-
-## License
-
-Copyright © Anees Haider. All rights reserved.
+© Anees Haider
