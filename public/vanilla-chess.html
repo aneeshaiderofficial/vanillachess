@@ -1577,6 +1577,16 @@
     });
 
     postToParent({ type: 'vc:ready', mode: modeEl.value });
+    if (window.parent !== window) {
+      document.body.style.minHeight = '0';
+      let lastH = 0;
+      const reportHeight = () => {
+        const h = Math.ceil(document.body.getBoundingClientRect().height);
+        if (Math.abs(h - lastH) > 1) { lastH = h; postToParent({ type: 'vc:height', height: h }); }
+      };
+      new ResizeObserver(reportHeight).observe(document.body);
+      reportHeight();
+    }
   </script>
 </body>
 </html>
