@@ -48,6 +48,7 @@ function Index() {
   const [match, setMatch] = useState<MatchInfo | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [unread, setUnread] = useState(0);
+  const [frameHeight, setFrameHeight] = useState(900);
 
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const frameReadyRef = useRef(false);
@@ -178,6 +179,11 @@ function Index() {
     const handler = (event: MessageEvent) => {
       const data = event.data as { type?: string; mode?: string; move?: MovePayload } | null;
       if (!data || typeof data !== "object") return;
+      if (data.type === "vc:height") {
+        const h = Number((data as { height?: number }).height);
+        if (h > 200) setFrameHeight(h);
+        return;
+      }
       if (data.type === "vc:ready") {
         frameReadyRef.current = true;
         const info = matchRef.current;
@@ -300,10 +306,12 @@ function Index() {
         </p>
       )}
 
-      <div className="min-h-0 flex-1">
+      <div>
         <iframe
           ref={frameRef}
-          className="h-full min-h-[640px] w-full border-0"
+          style={{ height: frameHeight }}
+          scrolling="no"
+          className="block w-full border-0"
           src="/vanilla-chess.html"
           title="Vanilla Chess by Anees Haider"
         />
