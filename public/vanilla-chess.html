@@ -1072,7 +1072,7 @@
     let pendingPromotion = null;
     let computerTimer = null;
     let isPaused = false;
-    const online = { active: false, color: null };
+    const online = { active: false, color: null, overSent: false };
     let applyingRemote = false;
     let lessonMoveCount = 0;
     let lessonQuestionPending = false;
@@ -1257,7 +1257,15 @@
         engine.gameOver = true;
         clearTimeout(computerTimer);
       }
+      if (engine.gameOver) notifyOnlineGameOver();
       return engine.gameOver;
+    }
+
+    // Tell the app shell once when an online game finishes so it can close the match.
+    function notifyOnlineGameOver() {
+      if (!online.active || online.overSent) return;
+      online.overSent = true;
+      window.parent.postMessage({ type: 'vc:game-over' }, '*');
     }
 
     function handleSquare(r, c) {
@@ -1431,6 +1439,7 @@
       document.body.classList.remove('computer-thinking');
       boardEl.classList.remove('computer-thinking');
       renderBoard();
+      notifyOnlineGameOver();
     }
 
     function humanColor() {
@@ -1560,6 +1569,7 @@
       if (data.type === 'vc:online-start') {
         online.active = true;
         online.color = data.color === 'b' ? 'b' : 'w';
+        online.overSent = false;
         document.body.classList.add('online-play');
         modeEl.value = 'human';
         isPaused = false;

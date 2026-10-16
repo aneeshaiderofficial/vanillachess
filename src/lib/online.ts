@@ -48,6 +48,16 @@ export async function leaveMatch(guestId: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function heartbeatMatch(matchId: string, guestId: string): Promise<void> {
+  const { error } = await db.rpc("heartbeat_match", { p_match: matchId, p_guest: guestId });
+  if (error) throw error;
+}
+
+export async function endMatch(matchId: string, guestId: string): Promise<void> {
+  const { error } = await db.rpc("end_match", { p_match: matchId, p_guest: guestId });
+  if (error) throw error;
+}
+
 export async function submitMove(
   matchId: string,
   guestId: string,
