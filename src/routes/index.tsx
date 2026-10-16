@@ -4,7 +4,9 @@ import { GuestSignIn } from "@/components/GuestSignIn";
 import { clearGuestName, loadGuest, type Guest } from "@/lib/guest";
 import {
   fetchMoves,
+  endMatch,
   getCurrentMatch,
+  heartbeatMatch,
   joinMatch,
   leaveMatch,
   moveToPayload,
@@ -55,6 +57,7 @@ function Index() {
   const lastPlyRef = useRef(-1);
   const matchRef = useRef<MatchInfo | null>(null);
   const guestRef = useRef<Guest | null>(null);
+  const startingRef = useRef<string | null>(null);
 
   useEffect(() => {
     setGuest(loadGuest());
@@ -84,6 +87,8 @@ function Index() {
 
   const startMatch = useCallback(
     async (info: MatchInfo) => {
+      if (startingRef.current === info.matchId) return;
+      startingRef.current = info.matchId;
       setMatch(info);
       matchRef.current = info;
       setOnlineState("playing");
@@ -91,8 +96,13 @@ function Index() {
       setUnread(0);
       lastPlyRef.current = -1;
       post({ type: "vc:online-start", color: info.myColor });
-      const rows = await fetchMoves(info.matchId);
-      for (const row of rows) applyMoveRow(row);
+      try {
+        const rows = await fetchMoves(info.matchId);
+        for (const row of rows) applyMoveRow(row);
+      } catch (error) {
+        startingRef.current = null;
+        throw error;
+      }
     },
     [applyMoveRow, post],
   );
@@ -103,6 +113,7 @@ function Index() {
       setOnlineState("off");
       setMatch(null);
       matchRef.current = null;
+      startingRef.current = null;
       setUnread(0);
       lastPlyRef.current = -1;
       post({ type: "vc:online-end" });
@@ -163,7 +174,11 @@ function Index() {
       try {
         await joinMatch(guest.id, guest.name);
         const info = await getCurrentMatch(guest.id);
-        if (!cancelled && info) await startMatch(info);
+        if (!cancelled && info) {
+          cancelled = true;
+          clearInterval(timer);
+          await startMatch(info);
+        }
       } catch (error) {
         console.error(error);
       }
@@ -173,6 +188,15 @@ function Index() {
       clearInterval(timer);
     };
   }, [onlineState, guest, startMatch]);
+
+  // Keep the match alive on the server; stale matches are ended by matchmaking.
+  useEffect(() => {
+    if (onlineState !== "playing" || !match || !guest) return;
+    const timer = setInterval(() => {
+      heartbeatMatch(match.matchId, guest.id).catch((error) => console.error(error));
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [onlineState, match, guest]);
 
   // Messages from the game board.
   useEffect(() => {
@@ -193,6 +217,20 @@ function Index() {
       if (data.type === "vc:mode") {
         if (data.mode === "human") void search();
         else void endOnline(null, true);
+        return;
+      }
+      if (data.type === "vc:game-over") {
+        const info = matchRef.current;
+        const currentGuest = guestRef.current;
+        if (!info || !currentGuest) return;
+        void (async () => {
+          try {
+            await endMatch(info.matchId, currentGuest.id);
+          } catch (error) {
+            console.error(error);
+          }
+          await endOnline("Game over.", false);
+        })();
         return;
       }
       if (data.type === "vc:move" && data.move) {
